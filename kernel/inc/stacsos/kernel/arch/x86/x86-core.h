@@ -34,6 +34,7 @@ public:
 
 	virtual void init() override;
 	virtual bool remote_run() override;
+	static pfn_t prepare_trampoline_code();
 
 	virtual timer &local_timer() override { return timer_; }
 

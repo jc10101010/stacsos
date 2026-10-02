@@ -105,6 +105,8 @@ public:
 
 	void set_icr(const x2apic_icr &icr) { msr::write(msr_indicies::X2APIC_ICR, icr.bits); }
 
+	void wait_icr_delivery();
+
 	void activate_periodic_tick(u64 frequency)
 	{
 		set_timer_periodic();
@@ -123,6 +125,8 @@ public:
 
 		// dprintf("icr: %016lx\n", v.bits);
 		set_icr(v);
+
+		wait_icr_delivery();
 	}
 
 	void send_remote_sipi(u32 target, u8 pfn)

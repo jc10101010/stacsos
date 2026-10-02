@@ -27,7 +27,7 @@ all: $(build-targets)
 clean: $(clean-targets)
 
 run: all
-	$(qemu) \
+	GTK_PATH="" GTK_MODULES="" $(qemu) \
 		-smp 4 \
 		-machine q35 \
 		-enable-kvm \

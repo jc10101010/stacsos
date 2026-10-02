@@ -55,14 +55,17 @@ void x2apic::init()
 
 	msrs::x2apic_icr = i.bits;
 
-	// Wait for pending deliveries to complete
-	while (msrs::x2apic_icr & DELIVS) {
-		asm volatile("");
-	}
+	wait_icr_delivery();
 
 	msrs::x2apic_tpr = 0;
 
 	calibrate_timer();
+}
+
+void x2apic::wait_icr_delivery() {
+	while (msrs::x2apic_icr & DELIVS) {
+		__relax();
+	}
 }
 
 void x2apic::calibrate_timer()

@@ -33,7 +33,7 @@ void core_manager::go()
 		}
 
 		dprintf("starting core %d...\n", cores_[i]->id_);
-		//cores_[i]->status_ = cores_[i]->remote_run() ? core_status::online : core_status::error;
+		cores_[i]->status_ = cores_[i]->remote_run() ? core_status::online : core_status::error;
 	}
 
 	// Start this core running

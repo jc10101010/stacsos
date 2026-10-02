@@ -106,19 +106,75 @@ void x86_core::populate_dt()
 	tss_.reload(0x28);
 }
 
-bool x86_core::remote_run() { return false; }
-
-#if 0
-struct mpstartup_data {
-	u64 mpready;
-	u64 mpcr3;
-	x86_core *core_obj;
-	void *mpstack;
-	void (stacsos::kernel::arch::x86::x86_core::*trampoline)(void);
+struct trampoline_data {			  
+	void (*closure)(void);
 } __packed;
 
-extern "C" char _MPSTARTUP_START, _MPSTARTUP_END, _MPSTARTUP_SIZE;
-extern "C" mpstartup_data _MPSTARTUP_DATA;
+extern "C" char _TRAMPOLINE_START, _TRAMPOLINE_END;
+extern "C" trampoline_data trampoline_data_asm;
+#define _TRAMPOLINE_SIZE ((u64)&_TRAMPOLINE_END - (u64)&_TRAMPOLINE_START)
+#define _TRAMPOLINE_DATA_OFFSET ((u64)&trampoline_data_asm - (u64)&_TRAMPOLINE_START)
+
+void trampoline_closure() {
+	
+}
+
+bool x86_core::remote_run() { 
+	
+	auto &me_bsp = this_core();
+
+	// We need to derive where the trampoline data struct has been moved to
+	pfn_t trampoline_pfn = prepare_trampoline_code();
+	unsigned long trampoline_moved_phys = trampoline_pfn << PAGE_BITS;
+	void* trampoline_moved_virt = phys_to_virt(trampoline_moved_phys);
+	void* trampoline_moved_data_virt = trampoline_moved_virt + _TRAMPOLINE_DATA_OFFSET;
+	trampoline_data* trampoline_moved_data = (trampoline_data*) trampoline_moved_data_virt;
+
+	// Now we need to link back the closure
+	trampoline_moved_data->closure = &trampoline_closure;
+
+	// The trampoline smoke-test writes 0x6767 to physical 0x1000 once the AP comes
+	// alive. Clear it first so we don't observe a stale value from a previous core.
+	volatile u16 *liveness = (volatile u16 *)phys_to_virt(0x8100);
+	*liveness = 0;
+
+	// INIT, then SIPI.
+	me_bsp.lapic_.send_remote_init(id());
+	me_bsp.tsc_.spin(10); // Wait for 10ms...
+	me_bsp.lapic_.send_remote_sipi(id(), trampoline_pfn);
+	me_bsp.tsc_.spin(10); // Give the AP time to run the trampoline.
+
+	// Report whether the AP actually executed the trampoline.
+	if (*liveness == 0x6767) {
+		dprintf("we have successfully started the 67 67 core");
+	} else {
+		dprintf("we have not successfulyl started the core");
+	}
+	return *liveness == 0x6767;
+
+	// Send next sipi
+
+	// Clear page we copied into maybe???
+
+
+}
+
+
+
+pfn_t x86_core::prepare_trampoline_code()
+{
+	pfn_t target_pfn = 8; // Page eight is what they used in the example
+
+	// Copy the trampoline assembly into this page
+	// Technically, we only need the 16-bit
+	// code, because once we jump into 32-bit mode, we're actually executing at normal addresses.
+	unsigned long target_phys_addr = target_pfn << PAGE_BITS;
+	memops::memcpy(phys_to_virt(target_phys_addr), phys_to_virt((unsigned long)&_TRAMPOLINE_START), (size_t)_TRAMPOLINE_SIZE);
+
+	return target_pfn;
+}
+
+#if 0
 
 bool x86_core::remote_run()
 {
@@ -159,23 +215,7 @@ bool x86_core::remote_run()
 	return !!d->mpready;
 }
 
-pfn_t x86_core::prepare_mpstartup_code()
-{
-	// This function is a total hack.  It just brutally copies the mp startup code and data into an arbitrary page,
-	// because we can only access PFNs < 0x100 when initialising other processors.
 
-	pfn_t target_pfn = 0; // Let's go for page 0.  The mp startup assembly is written to
-						  // work in page 0 -- there is one place where a relative address
-						  // computation is made, which assumes we're running in page zero.
-
-	// Copy the mp startup assembly into the right place.  Technically, we only need the 16-bit
-	// code, because once we jump into 32-bit mode, we're actually executing at normal addresses.
-	void *target_addr = (void *)(target_pfn << PAGE_BITS);
-	memops::memcpy(target_addr, (void *)&_MPSTARTUP_START, (size_t)&_MPSTARTUP_SIZE);
-
-	// We really need to remember to unmap page zero later...
-	return target_pfn;
-}
 
 void x86_core::complete_remote_init()
 {

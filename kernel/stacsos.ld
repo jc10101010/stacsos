@@ -6,6 +6,8 @@ PHDRS
 	startup_header PT_LOAD FILEHDR PHDRS;
 	startup_text PT_LOAD;
 	startup_data PT_LOAD;
+	trampoline_text PT_LOAD;
+	trampoline_data PT_LOAD;
 	text PT_LOAD;
 	data PT_LOAD;
 }
@@ -42,6 +44,25 @@ SECTIONS
 	} :startup_data
 
 	_STARTUP_END = .;
+
+	. = ALIGN(16);
+
+	_TRAMPOLINE_START = .;
+
+	trampoline.text :
+	{
+		*(.trampoline.text16)
+	} :trampoline_text
+
+	. = ALIGN(16);
+
+	.trampoline.data :
+	{
+		*(.trampoline.data)
+	} :trampoline_data
+
+	_TRAMPOLINE_END = .;
+
 
 	/* Main Kernel Code and Data */
 
