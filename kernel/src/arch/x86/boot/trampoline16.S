@@ -10,12 +10,61 @@
 
 .align 16
 
-.type trampoline16, %function
-trampoline16:   
+_L0000_trampoline16:   
     /*We need to get this fresh core from 16 bit real to 64 bit long*/
-    movw $0x6767, %ax
-    movw %ax, 0x8100
+    cli # Disable interrupts
+    cld # Reset directions of string instructions
+    jmp    _L0050_trampoline16
+    .align 16
+_L0010_GDT_table:
+    .long 0, 0
+    .long 0x0000FFFF, 0x00CF9A00    # flat code
+    .long 0x0000FFFF, 0x008F9200    # flat data
+    .align 16
+_L0030_GDT_value:
+    .word _L0030_GDT_value - _L0010_GDT_table - 1
+    .long 0x0000 # This needs to be repaired, should point to the thing below
+    .long 0, 0
+    .align 16
+_L0040_FARJMP:
+    .long   0                   # 32-bit offset  — patched at runtime
+    .word   0x08                # selector       — flat PM code, fixed
+    .align 16
+_L0050_trampoline16:
+    movw %cs, %ax                # Copy the CS segment over to DS
+    movw %ax, %ds
+
+    /* The segment base (CS * 16) is the linear address this trampoline was
+       loaded at.  Both the GDTR base and the far-jump offset are linear
+       addresses, so compute the base once and keep it in EDX. */
+    xorl    %edx, %edx
+    movw    %cs, %dx
+    shll    $4, %edx           # EDX = CS * 16 = linear base of the trampoline
+
+    /* Patch the GDT descriptor's base field (at offset 0x32, just after the
+       2-byte limit) with the linear address of _L0010_GDT_table = base+0x10.
+       Must happen BEFORE lgdtl, which reads the descriptor. */
+    leal    0x10(%edx), %eax   # base + 0x10 (_L0010_GDT_table)
+    movl    %eax, 0x0032       # GDTR base field
+
+    lgdtl   0x0030             # load the GDT (now with a correct linear base)
+
+    movl    %cr0, %eax         # get cr0
+    orl     $1, %eax           # set bit 0 (PE)
+    movl    %eax, %cr0         # set cr0, protection enabled
+
+    /* Patch the far-jump offset (at 0x40) with the linear address of the
+       32-bit entry = base + 0x90 (_L0090_trampoline32). */
+    leal    0x90(%edx), %eax   # base + 0x90 (_L0090_trampoline32)
+    movl    %eax, 0x0040       # far-jump 32-bit offset field
+
+    ljmpl   *0x0040            # far jump via FARJMP descriptor @ 0x40 (DS-rel)
+    .align 16
+    .code32
+_L0090_trampoline32:
     hlt
+
+
 .align 16
 
 /* TODO: Make independant of page run in ideally*/
