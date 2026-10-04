@@ -5,6 +5,12 @@
  * Copyright (C) University of St Andrews 2024.  All Rights Reserved.
  * Tom Spink <tcs6@st-andrews.ac.uk>
  */
+
+/* AP per-core scratch stacks live immediately after the BSP's scratch region
+ * from start32.S (SCRATCH_MEMORY = 0x100000, consuming 5 pages: one boot stack
+ * page + PML4 + PDP_LO/MID/HI), which ends at 0x105000.  One 4K page per core. */
+#define TRAMPOLINE_SCRATCH_MEMORY  0x105000
+
 .code16
 .section .trampoline.text16, "ax"
 
@@ -62,6 +68,27 @@ _L0050_trampoline16:
     .align 16
     .code32
 _L0090_trampoline32:
+    # Zero out segment selectors
+    movw   $0x10, %ax          # flat data selector
+    movw   %ax, %ds            # (ds/es/ss still hold stale real-mode values here)
+    movw   %ax, %es
+    movw   %ax, %ss
+
+    # Get this CPUs scratch stack section
+    movl $1, %eax                    # increment amount for the atomic add
+    lock xaddl %eax, -----0x90(%edx) # eax = old counter = this core's index; counter++ (TODO patch offset once we know data offset)
+    movl %eax, %ecx                  # keep the raw core index in ecx for later use
+    shll $12, %eax                   # index * 4096 = this core's page offset
+    addl $TRAMPOLINE_SCRATCH_MEMORY, %eax # Determine where the trampolines stack should fit in
+    addl $0x1000, %eax                    #  The top of that page is the top of the stack
+    movl %eax, %esp                      # Now each core has there own stack
+
+    # Next we need to read from page tables
+
+    
+
+
+
     hlt
 
 
@@ -78,5 +105,6 @@ _L0090_trampoline32:
 .globl trampoline_data_asm
 .type trampoline_data_asm, %object
 trampoline_data_asm:
+    .long 0
     .quad 0     /* void (*trampoline)()    (offset 0) */
 .size trampoline_data_asm,.-trampoline_data_asm

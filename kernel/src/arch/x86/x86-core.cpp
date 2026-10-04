@@ -106,7 +106,8 @@ void x86_core::populate_dt()
 	tss_.reload(0x28);
 }
 
-struct trampoline_data {			  
+struct trampoline_data {	
+	u32 core_count;		  
 	void (*closure)(void);
 } __packed;
 
@@ -165,12 +166,19 @@ pfn_t x86_core::prepare_trampoline_code()
 {
 	pfn_t target_pfn = 8; // Page eight is what they used in the example
 
+	// Lazily copy the trampoline image exactly once. 
+	static bool trampoline_prepared = false;
+	if (trampoline_prepared) {
+		return target_pfn;
+	}
+
 	// Copy the trampoline assembly into this page
 	// Technically, we only need the 16-bit
 	// code, because once we jump into 32-bit mode, we're actually executing at normal addresses.
 	unsigned long target_phys_addr = target_pfn << PAGE_BITS;
 	memops::memcpy(phys_to_virt(target_phys_addr), phys_to_virt((unsigned long)&_TRAMPOLINE_START), (size_t)_TRAMPOLINE_SIZE);
 
+	trampoline_prepared = true;
 	return target_pfn;
 }
 
