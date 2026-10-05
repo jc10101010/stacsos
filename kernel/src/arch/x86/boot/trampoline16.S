@@ -115,6 +115,7 @@ trampoline32_main:
     addl $TRAMPOLINE_SCRATCH_MEMORY, %eax # Determine where the trampolines stack should fit in
     addl $0x1000, %eax                    # The top of that page is the top of the stack
     movl %eax, %esp                      # Now each core has there own stack
+    movl %eax, %esi                      # Save this address for later access
 
     # Next we need to read from PML4 already setup by the BSP
     mov $PML4, %cr3
@@ -160,12 +161,34 @@ has_fsgs:
 
     .align 16
     .code64
-    .section .startup.text64, "ax"
+    .section .trampoline.text64, "ax"
+farjmp_to_kernel:
+    .quad 0                          /* 64-bit offset — patched at runtime */
+    .word 0x08                       /* selector — 64-bit code */
+    .align 16
 trampoline64_start:
-    hlt
+    # OK - we're nearly there now!  We've made it to 64-bit mode, so get the
+	# final things ready before we go into our main C++ code.
 
+	# Re-initialise segment registers
+	mov $0x10, %eax
+	mov %ax, %ds
+	mov %ax, %es
+	mov %ax, %ss
 
+	xor %eax, %eax
+	mov %ax, %fs
+	mov %ax, %gs
 
+    # Reset your cores stack pointer
+    mov %esi, %rsp
+
+    # Then adjust so that it is accessed through the memory mapped full window
+    mov $0xffff800000000000, %rcx
+    add %rcx, %rsp
+
+    # We need to jump into the trampoline function we have been given
+    jmp *(trampoline_data_asm_ptr - trampoline_start)(%rdx)
 
 .section .trampoline.data, "aw"
 

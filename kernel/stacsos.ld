@@ -52,6 +52,9 @@ SECTIONS
 	trampoline.text :
 	{
 		*(.trampoline.text16)
+		*(.trampoline.text32)
+		*(.trampoline.text64)
+		*(.trampoline.data)
 	} :trampoline_text
 
 	. = ALIGN(16);
