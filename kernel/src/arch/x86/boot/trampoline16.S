@@ -18,8 +18,8 @@
 
 /* Entry point — bring this AP from 16-bit real mode to 64-bit long mode */
 trampoline_start:
-    cli
-    cld
+    cli                          # Disable interrupts
+    cld                          # Reset directions of string instructions
     jmp    trampoline16_main
     .align 16
 
@@ -44,27 +44,32 @@ farjmp_real:
 
 /* ── 16-bit trampoline code ─────────────────────────────────────────────── */
 trampoline16_main:
-    movw    %cs, %ax
+    movw    %cs, %ax                # Copy the CS segment over to DS
     movw    %ax, %ds
 
-    /* EDX = CS * 16 = linear base of this trampoline page */
+    /* The segment base (CS * 16) is the linear address this trampoline was
+       loaded at.  Both the GDTR base and the far-jump offset are linear
+       addresses, so compute the base once and keep it in EDX. */
     xorl    %edx, %edx
     movw    %cs, %dx
-    shll    $4, %edx
+    shll    $4, %edx           # EDX = CS * 16 = linear base of the trampoline
 
-    leal    (gdt_real - trampoline_start)(%edx), %eax
-    movl    %eax, (gdtr_real_base - trampoline_start)
+    /* Patch the GDT descriptor's base field with the linear address of gdt_real.
+       Must happen BEFORE lgdtl, which reads the descriptor. */
+    leal    (gdt_real - trampoline_start)(%edx), %eax   # base + gdt_real offset
+    movl    %eax, (gdtr_real_base - trampoline_start)   # GDTR base field
 
-    lgdtl   (gdtr_real - trampoline_start)
+    lgdtl   (gdtr_real - trampoline_start)              # load the GDT (now with a correct linear base)
 
-    movl    %cr0, %eax
-    orl     $1, %eax
-    movl    %eax, %cr0
+    movl    %cr0, %eax         # get cr0
+    orl     $1, %eax           # set bit 0 (PE)
+    movl    %eax, %cr0         # set cr0, protection enabled
 
-    leal    (trampoline32_main - trampoline_start)(%edx), %eax
-    movl    %eax, (farjmp_real - trampoline_start)
+    /* Patch the far-jump offset with the linear address of trampoline32_main. */
+    leal    (trampoline32_main - trampoline_start)(%edx), %eax   # base + trampoline32_main offset
+    movl    %eax, (farjmp_real - trampoline_start)               # far-jump offset field
 
-    ljmpl   *(farjmp_real - trampoline_start)
+    ljmpl   *(farjmp_real - trampoline_start)                    # far jump to trampoline32_main (PM32)
     .align 16
 
 /* ── Null IDTR ──────────────────────────────────────────────────────────── */
@@ -96,21 +101,25 @@ farjmp_long:
 
 /* ── 32-bit trampoline code ─────────────────────────────────────────────── */
 trampoline32_main:
-    movw   $0x10, %ax
-    movw   %ax, %ds
+    # Zero out segment selectors
+    movw   $0x10, %ax          # flat data selector
+    movw   %ax, %ds            # (ds/es/ss still hold stale real-mode values here)
     movw   %ax, %es
     movw   %ax, %ss
 
-    movl $1, %eax
-    lock xaddl %eax, (trampoline_data_asm_count - trampoline_start)(%edx) 
-    movl %eax, %ecx
-    shll $12, %eax
-    addl $TRAMPOLINE_SCRATCH_MEMORY, %eax
-    addl $0x1000, %eax
-    movl %eax, %esp
+    # Get this CPUs scratch stack section
+    movl $1, %eax                    # increment amount for the atomic add
+    lock xaddl %eax, (trampoline_data_asm_count - trampoline_start)(%edx) # eax = old counter = this core's index; counter++
+    movl %eax, %ecx                  # keep the raw core index in ecx for later use
+    shll $12, %eax                   # index * 4096 = this core's page offset
+    addl $TRAMPOLINE_SCRATCH_MEMORY, %eax # Determine where the trampolines stack should fit in
+    addl $0x1000, %eax                    # The top of that page is the top of the stack
+    movl %eax, %esp                      # Now each core has there own stack
 
+    # Next we need to read from PML4 already setup by the BSP
     mov $PML4, %cr3
 
+    # Check for FSGSBASE
     mov $7, %eax
     xor %ecx, %ecx
     cpuid
@@ -120,13 +129,16 @@ trampoline32_main:
     jc has_fsgs
     and $(~CR4_FSGSBASE), %eax
 has_fsgs:
+    # Initialise CR4
     mov %eax, %cr4
 
+    # Initialise EFER
     mov $(0xC0000080), %ecx
     xor %edx, %edx
     mov $(EFER_SCE | EFER_LME | EFER_NXE), %eax
     wrmsr
 
+    # Initialise CR0
     mov $(CR0_PG | CR0_PE | CR0_MP | CR0_WP | CR0_NE), %eax
     mov %eax, %cr0
 
@@ -134,14 +146,17 @@ has_fsgs:
     leal    (gdt_long - trampoline_start)(%edx), %eax
     movl    %eax, (gdtr_long_base - trampoline_start)(%edx)
 
+    # Load a null IDT
     lidt    (null_idtr  - trampoline_start)(%edx)
+
+    # Load the temporary GDT
     lgdt    (gdtr_long  - trampoline_start)(%edx)
 
-    /* Patch farjmp_long offset with the address of the 64-bit entry point */
+    # PATCH FARJUMP to trampoline64_start
     leal    (trampoline64_start - trampoline_start)(%edx), %eax
     movl    %eax, (farjmp_long - trampoline_start)(%edx)
 
-    ljmp    *(farjmp_long - trampoline_start)(%edx)
+    ljmp    *(farjmp_long - trampoline_start)(%edx)     # jump to trampoline64_start (long mode)
 
     .align 16
     .code64
