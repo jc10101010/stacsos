@@ -110,7 +110,7 @@ trampoline32_main:
     # Get this CPUs scratch stack section
     movl $1, %eax                    # increment amount for the atomic add
     lock xaddl %eax, (trampoline_data_asm_count - trampoline_start)(%edx) # eax = old counter = this core's index; counter++
-    movl %eax, %ecx                  # keep the raw core index in ecx for later use
+    movl %eax, %ebp                  # keep the raw core index in ebp for later use
     shll $12, %eax                   # index * 4096 = this core's page offset
     addl $TRAMPOLINE_SCRATCH_MEMORY, %eax # Determine where the trampolines stack should fit in
     addl $0x1000, %eax                    # The top of that page is the top of the stack
@@ -119,6 +119,8 @@ trampoline32_main:
 
     # Next we need to read from PML4 already setup by the BSP
     mov $PML4, %cr3
+
+    pushl %edx                               # save trampoline base — CPUID and WRMSR both clobber EDX
 
     # Check for FSGSBASE
     mov $7, %eax
@@ -138,6 +140,8 @@ has_fsgs:
     xor %edx, %edx
     mov $(EFER_SCE | EFER_LME | EFER_NXE), %eax
     wrmsr
+
+    popl %edx                                # restore trampoline base
 
     # Initialise CR0
     mov $(CR0_PG | CR0_PE | CR0_MP | CR0_WP | CR0_NE), %eax
@@ -162,10 +166,6 @@ has_fsgs:
     .align 16
     .code64
     .section .trampoline.text64, "ax"
-farjmp_to_kernel:
-    .quad 0                          /* 64-bit offset — patched at runtime */
-    .word 0x08                       /* selector — 64-bit code */
-    .align 16
 trampoline64_start:
     # OK - we're nearly there now!  We've made it to 64-bit mode, so get the
 	# final things ready before we go into our main C++ code.
