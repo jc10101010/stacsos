@@ -11,6 +11,31 @@
  * page + PML4 + PDP_LO/MID/HI), which ends at 0x105000.  One 4K page per core. */
 #define TRAMPOLINE_SCRATCH_MEMORY  0x105000
 
+/* These must match the definitions in start32.S — the BSP sets up the page
+ * tables at SCRATCH_MEMORY and the control-register bits are architectural. */
+#define SCRATCH_MEMORY  0x100000
+#define PML4            (SCRATCH_MEMORY + 0x1000)
+
+/* CR0 */
+#define CR0_PE  (1u << 0)
+#define CR0_MP  (1u << 1)
+#define CR0_NE  (1u << 5)
+#define CR0_WP  (1u << 16)
+#define CR0_PG  (1u << 31)
+
+/* CR4 */
+#define CR4_PSE        (1u << 4)
+#define CR4_PAE        (1u << 5)
+#define CR4_PGE        (1u << 7)
+#define CR4_OSFXSR     (1u << 9)
+#define CR4_OSXMMEXCPT (1u << 10)
+#define CR4_FSGSBASE   (1u << 16)
+
+/* EFER */
+#define EFER_SCE    (1u << 0)
+#define EFER_LME    (1u << 8)
+#define EFER_NXE    (1u << 11)
+
 .code16
 .section .trampoline.text16, "ax"
 
@@ -117,8 +142,8 @@ trampoline32_main:
     movl %eax, %esp                      # Now each core has there own stack
     movl %eax, %esi                      # Save this address for later access
 
-    # Next we need to read from PML4 already setup by the BSP
-    mov $PML4, %cr3
+    mov $PML4, %eax
+    mov %eax, %cr3
 
     pushl %edx                               # save trampoline base — CPUID and WRMSR both clobber EDX
 
@@ -161,6 +186,10 @@ has_fsgs:
     leal    (trampoline64_start - trampoline_start)(%edx), %eax
     movl    %eax, (farjmp_long - trampoline_start)(%edx)
 
+    # Compute the linear address of the closure pointer here, while we are still
+    # in the .trampoline.text16 section. Calculation must be in the same section
+    leal    (trampoline_data_asm_ptr - trampoline_start)(%edx), %edi
+
     ljmp    *(farjmp_long - trampoline_start)(%edx)     # jump to trampoline64_start (long mode)
 
     .align 16
@@ -187,8 +216,10 @@ trampoline64_start:
     mov $0xffff800000000000, %rcx
     add %rcx, %rsp
 
-    # We need to jump into the trampoline function we have been given
-    jmp *(trampoline_data_asm_ptr - trampoline_start)(%rdx)
+    # rdi holds the pointer given to use by the kernel
+    # We need to zero upper 32 bits of rdi
+    mov %edi, %edi
+    jmp *(%rdi)
 
 .section .trampoline.data, "aw"
 
@@ -198,6 +229,7 @@ trampoline64_start:
 .align 8
 .globl trampoline_data_asm
 .type trampoline_data_asm, %object
+trampoline_data_asm:
 trampoline_data_asm_count:
     .long 0
 trampoline_data_asm_ptr:

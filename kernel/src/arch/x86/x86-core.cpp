@@ -117,7 +117,10 @@ extern "C" trampoline_data trampoline_data_asm;
 #define _TRAMPOLINE_DATA_OFFSET ((u64)&trampoline_data_asm - (u64)&_TRAMPOLINE_START)
 
 void trampoline_closure() {
-	
+	// Park the core.  Interrupts are still masked, so this halts for good.
+	for (;;) {
+		asm volatile("hlt");
+	}
 }
 
 bool x86_core::remote_run() { 
