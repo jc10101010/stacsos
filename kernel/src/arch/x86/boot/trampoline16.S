@@ -16,7 +16,7 @@
 
 .align 16
 
-_L0000_trampoline16:   
+_L0000_trampoline16:
     /*We need to get this fresh core from 16 bit real to 64 bit long*/
     cli # Disable interrupts
     cld # Reset directions of string instructions
@@ -66,8 +66,32 @@ _L0050_trampoline16:
 
     ljmpl   *0x0040            # far jump via FARJMP descriptor @ 0x40 (DS-rel)
     .align 16
+/* NULL IDT Pointer */
+_L0060_NULL_IDTP:
+    .word 0
+    .long 0
+    .align 4
+/* Temporary GDT */
+_L0070_LONG_GDT_table:
+    .quad 0x0000000000000000		// NULL
+
+    // 64-bit Code Segment @ 0x08
+    .quad 0x00209A0000000000
+
+    // Data Segment @ 0x10
+    .quad 0x0000920000000000
+    .align 4
+/* Temporary GDT pointer */
+_L0080_LONG_GDT_value:
+    .word (gdt_end - gdt)
+    .long gdt
+    .align 16
     .code32
-_L0090_trampoline32:
+_L0090_FARJMP:
+    .long   0                   # 32-bit offset  — patched at runtime
+    .word   0x08                # selector       — flat PM code, fixed
+    .align 16
+_L00A0_trampoline32:
     # Zero out segment selectors
     movw   $0x10, %ax          # flat data selector
     movw   %ax, %ds            # (ds/es/ss still hold stale real-mode values here)
@@ -83,22 +107,58 @@ _L0090_trampoline32:
     addl $0x1000, %eax                    #  The top of that page is the top of the stack
     movl %eax, %esp                      # Now each core has there own stack
 
-    # Next we need to read from page tables
+    # Next we need to read from PML4 already setup by the BSP
+    mov $PML4, %cr3
 
-    
+    # Check for FSGSBASE
+    mov $7, %eax
+    xor %ecx, %ecx
+    cpuid
+    bt $0, %ebx
 
+    mov $(CR4_PSE | CR4_PAE | CR4_PGE | CR4_OSFXSR | CR4_OSXMMEXCPT | CR4_FSGSBASE), %eax
+    jc has_fsgs
 
+    and $(~CR4_FSGSBASE), %eax
 
+has_fsgs:
+
+    # Initialise CR4
+    mov %eax, %cr4
+
+    # Initialise EFER
+    mov $(0xC0000080), %ecx
+    xor %edx, %edx
+    mov $(EFER_SCE | EFER_LME | EFER_NXE), %eax
+    wrmsr
+
+    # Initialise CR0
+    mov $(CR0_PG | CR0_PE | CR0_MP | CR0_WP | CR0_NE), %eax
+    mov %eax, %cr0
+
+    # Load a null IDT
+    lidt 0x60(%edx)
+
+    # Load the temporary GDT
+    lgdt 0x70(%edx)
+
+    # PATCH FARJUMP to _L00B0_trampoline64
+
+    ljmp *0x90(%edx) # Got to _L00B0_trampoline64
+
+    .align 16
+    .code64
+    .section .startup.text64, "ax"
+_L00B0_trampoline64:
     hlt
 
 
-.align 16
 
 /* TODO: Make independant of page run in ideally*/
 
 .section .trampoline.data, "aw"
 
-/* 
+/*
     Stores the closure pointer, the same for all started up APs
  */
 .align 8
