@@ -168,20 +168,20 @@ has_fsgs:
     .section .trampoline.text64, "ax"
 trampoline64_start:
     # OK - we're nearly there now!  We've made it to 64-bit mode, so get the
-	# final things ready before we go into our main C++ code.
+    # final things ready before we go into our main C++ code.
 
-	# Re-initialise segment registers
-	mov $0x10, %eax
-	mov %ax, %ds
-	mov %ax, %es
-	mov %ax, %ss
+    # Re-initialise segment registers
+    mov $0x10, %eax
+    mov %ax, %ds
+    mov %ax, %es
+    mov %ax, %ss
 
-	xor %eax, %eax
-	mov %ax, %fs
-	mov %ax, %gs
+    xor %eax, %eax
+    mov %ax, %fs
+    mov %ax, %gs
 
     # Reset your cores stack pointer
-    mov %esi, %rsp
+    movl %esi, %esp
 
     # Then adjust so that it is accessed through the memory mapped full window
     mov $0xffff800000000000, %rcx
@@ -201,5 +201,5 @@ trampoline64_start:
 trampoline_data_asm_count:
     .long 0
 trampoline_data_asm_ptr:
-    .quad 0     /* void (*trampoline)()    (offset 0) */
+    .quad 0     /* void (*trampoline)()    (offset 4) */
 .size trampoline_data_asm,.-trampoline_data_asm
