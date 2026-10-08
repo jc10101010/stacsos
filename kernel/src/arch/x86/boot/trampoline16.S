@@ -258,6 +258,10 @@ has_fsgs:
 
     ljmp    *(farjmp_long - trampoline_start)(%edx)     # jump to trampoline64_start (long mode)
 
+no_1g:
+    hlt
+    jmp     no_1g
+
     .align 16
     .code64
     .section .trampoline.text64, "ax"
