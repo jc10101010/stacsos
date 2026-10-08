@@ -157,9 +157,11 @@ trampoline32_main:
     # Now configure the PDPs
     # First, check that 1G mappings are available on our CPU, and error
     # out if not.  TODO: Try 2M mappings.
+    movl %edx, %edi
     mov $0x80000001, %eax
     cpuid
     bt $26, %edx
+    movl %edi, %edx
     jnc no_1g
     # PDP_LO
     movl $(PDP_LO), %ebx            // Address of PDP_LO into EBX
