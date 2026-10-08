@@ -10,11 +10,12 @@
  * from start32.S (SCRATCH_MEMORY = 0x100000, consuming 5 pages: one boot stack
  * page + PML4 + PDP_LO/MID/HI), which ends at 0x105000.  One 4K page per core. */
 #define TRAMPOLINE_SCRATCH_MEMORY  0x105000
-
-/* These must match the definitions in start32.S — the BSP sets up the page
- * tables at SCRATCH_MEMORY and the control-register bits are architectural. */
-#define SCRATCH_MEMORY  0x100000
-#define PML4            (SCRATCH_MEMORY + 0x1000)
+#define TRAMPOLINE_PAGE_MEMORY 0x200000
+#define PML4            (TRAMPOLINE_PAGE_MEMORY)
+#define PDP_LO          (TRAMPOLINE_PAGE_MEMORY + 0x1000)
+#define PDP_MID         (TRAMPOLINE_PAGE_MEMORY + 0x2000)
+#define PDP_HI          (TRAMPOLINE_PAGE_MEMORY + 0x3000)
+#define STACK_BOTTOM    (TRAMPOLINE_PAGE_MEMORY + 0x4000)
 
 /* CR0 */
 #define CR0_PE  (1u << 0)
@@ -132,6 +133,74 @@ trampoline32_main:
     movw   %ax, %es
     movw   %ax, %ss
 
+    # Create the CPUs scratch page mapping
+    # Prepare the PML4
+    movl $(PML4), %ebx
+    # Zero the three consecutive pages
+    movl $4, %ecx
+    mov %ebx, %edi
+	xor %eax, %eax
+	cld
+	shl $10, %ecx
+	repz stosl
+
+    # Update cr3 with address of PML4
+    mov %ebx, %cr3
+
+    # EBX holds the address of the PML4, so write the address of the
+    # PDP_LO (with PRESENT + W flags) into the first slot.
+    movl $(PDP_LO | 3), 0x000(%ebx)
+    # Write the address of PDP_MID into the slot just above the break.
+    movl $(PDP_MID | 3), 0x800(%ebx)
+    # Write the address of PDP_HI into the last slot.
+    movl $(PDP_HI | 3), 0xff8(%ebx)
+    # Now configure the PDPs
+    # First, check that 1G mappings are available on our CPU, and error
+    # out if not.  TODO: Try 2M mappings.
+    mov $0x80000001, %eax
+    cpuid
+    bt $26, %edx
+    jnc no_1g
+    # PDP_LO
+    movl $(PDP_LO), %ebx            // Address of PDP_LO into EBX
+    movl $0x00000083, 0x000(%ebx)	// 1G mapping:  0 ->  0
+    movl $0x40000083, 0x008(%ebx)	// 1G mapping: 1G -> 1G
+    # PDP_MID
+    movl $(PDP_MID), %ebx            // Address of PDP_MID into EBX
+    movl $0x00000083, 0x000(%ebx)	// 1G mapping: 0xffff800000000000 ->  0G
+    movl $0x40000083, 0x008(%ebx)	// 1G mapping: 0xffff800040000000 ->  1G
+    movl $0x80000083, 0x010(%ebx)	// 1G mapping: 0xffff800080000000 ->  2G
+    movl $0xc0000083, 0x018(%ebx)	// 1G mapping: 0xffff8000c0000000 ->  3G
+
+    movl $0x00000083, 0x020(%ebx)	// 1G mapping: 0xffff800100000000 ->  4G
+    movl $0x00000001, 0x024(%ebx)	// 1G mapping: 0xffff800100000000 ->  4G
+
+    movl $0x40000083, 0x028(%ebx)	// 1G mapping: 0xffff800140000000 ->  5G
+    movl $0x00000001, 0x02c(%ebx)	// 1G mapping: 0xffff800140000000 ->  5G
+
+    movl $0x80000083, 0x030(%ebx)	// 1G mapping: 0xffff800180000000 ->  6G
+    movl $0x00000001, 0x034(%ebx)	// 1G mapping: 0xffff800180000000 ->  6G
+
+    movl $0xc0000083, 0x038(%ebx)	// 1G mapping: 0xffff8001c0000000 ->  7G
+    movl $0x00000001, 0x03c(%ebx)	// 1G mapping: 0xffff8001c0000000 ->  7G
+
+    movl $0x00000083, 0x040(%ebx)	// 1G mapping: 0xffff800200000000 ->  8G
+    movl $0x00000002, 0x044(%ebx)	// 1G mapping: 0xffff800200000000 ->  8G
+
+    movl $0x40000083, 0x048(%ebx)	// 1G mapping: 0xffff800240000000 ->  9G
+    movl $0x00000002, 0x04c(%ebx)	// 1G mapping: 0xffff800240000000 ->  9G
+
+    movl $0x80000083, 0x050(%ebx)	// 1G mapping: 0xffff800280000000 -> 10G
+    movl $0x00000002, 0x054(%ebx)	// 1G mapping: 0xffff800280000000 -> 10G
+
+    movl $0xc0000083, 0x058(%ebx)	// 1G mapping: 0xffff8002c0000000 -> 11G
+    movl $0x00000002, 0x05c(%ebx)	// 1G mapping: 0xffff8002c0000000 -> 11G
+
+    # PDP_HI
+    movl $(PDP_HI), %ebx            // Address of PDP_HI into EBX
+    movl $0x00000083, 0xff0(%ebx)	// 1G mapping: 0xffffffff80000000 -> 0G
+    movl $0x40000083, 0xff8(%ebx)	// 1G mapping: 0xffffffffc0000000 -> 1G
+
     # Get this CPUs scratch stack section
     movl $1, %eax                    # increment amount for the atomic add
     lock xaddl %eax, (trampoline_data_asm_count - trampoline_start)(%edx) # eax = old counter = this core's index; counter++
@@ -141,9 +210,6 @@ trampoline32_main:
     addl $0x1000, %eax                    # The top of that page is the top of the stack
     movl %eax, %esp                      # Now each core has there own stack
     movl %eax, %esi                      # Save this address for later access
-
-    mov $PML4, %eax
-    mov %eax, %cr3
 
     pushl %edx                               # save trampoline base — CPUID and WRMSR both clobber EDX
 
@@ -219,7 +285,8 @@ trampoline64_start:
     # rdi holds the pointer given to use by the kernel
     # We need to zero upper 32 bits of rdi
     mov %edi, %edi
-    jmp *(%rdi)
+    mov %rdi, %rax
+    jmp x86_ap_start
 
 .section .trampoline.data, "aw"
 
