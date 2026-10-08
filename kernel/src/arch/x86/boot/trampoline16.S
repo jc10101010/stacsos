@@ -289,8 +289,11 @@ trampoline64_start:
     # rdi holds the pointer given to use by the kernel
     # We need to zero upper 32 bits of rdi
     mov %edi, %edi
-    mov %rdi, %rax
-    jmp x86_ap_start
+
+    # We are still executing from the relocated low copy of the trampoline
+    # (physical 0x8000), so we need an absolute jmp
+    movabs $x86_ap_start, %rax
+    jmp *%rax
 
 .section .trampoline.data, "aw"
 
