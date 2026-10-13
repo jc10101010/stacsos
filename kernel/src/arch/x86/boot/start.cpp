@@ -149,3 +149,38 @@ extern "C" __noreturn void x86_start(const multiboot_info *multiboot_info)
 	// This is unreachable because main() does not return.
 	__unreachable();
 }
+
+/**
+ * Main entry point for application processors, after coming in from the long-mode assembly code.
+ * @param closure_func A function pointer for our AP to execute after x86 startup
+ */
+extern "C" __noreturn void x86_ap_start(void* closure_func)
+{
+	// Clear lower mappings in the virtual address space.  This will significantly
+	// help with any memory-related bugs.  Especially since it removes the zero page!
+	clear_lower_mappings();
+
+	dprintf("HELLO WORLD THIS IS CORE\n");
+
+	// Park the core.  Interrupts are still masked, so this halts for good.
+	for (;;) {
+		asm volatile("hlt");
+	}
+
+	// // Make sure arch features are available.
+	// check_arch_support();
+
+	// // Process the command-line.
+	// process_command_line(multiboot_info);
+	// dprintf("command-line: %s\n", __boot_command_line);
+
+	// // Initialise memory.
+	// initialise_memory(multiboot_info);
+
+	// // Call the main kernel.
+	// main(__boot_command_line);
+
+	// // This is unreachable because main() does not return.
+	// __unreachable();
+}
+

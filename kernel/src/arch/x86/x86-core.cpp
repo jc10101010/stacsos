@@ -117,6 +117,10 @@ extern "C" trampoline_data trampoline_data_asm;
 #define _TRAMPOLINE_DATA_OFFSET ((u64)&trampoline_data_asm - (u64)&_TRAMPOLINE_START)
 
 void trampoline_closure() {
+
+	
+
+
 	// Park the core.  Interrupts are still masked, so this halts for good.
 	for (;;) {
 		asm volatile("hlt");
@@ -135,12 +139,10 @@ bool x86_core::remote_run() {
 	trampoline_data* trampoline_moved_data = (trampoline_data*) trampoline_moved_data_virt;
 
 	// Now we need to link back the closure
-	trampoline_moved_data->closure = &trampoline_closure;
-
-	// The trampoline smoke-test writes 0x6767 to physical 0x1000 once the AP comes
-	// alive. Clear it first so we don't observe a stale value from a previous core.
-	volatile u16 *liveness = (volatile u16 *)phys_to_virt(0x8100);
-	*liveness = 0;
+	int num_cores_before = trampoline_moved_data->core_count;
+	if (num_cores_before == 0) {
+		trampoline_moved_data->closure = &trampoline_closure;
+	}
 
 	// INIT, then SIPI.
 	me_bsp.lapic_.send_remote_init(id());
@@ -148,19 +150,14 @@ bool x86_core::remote_run() {
 	me_bsp.lapic_.send_remote_sipi(id(), trampoline_pfn);
 	me_bsp.tsc_.spin(10); // Give the AP time to run the trampoline.
 
-	// Report whether the AP actually executed the trampoline.
-	if (*liveness == 0x6767) {
-		dprintf("we have successfully started the 67 67 core");
+	int num_cores_after = trampoline_moved_data->core_count;
+	if (num_cores_after == num_cores_before + 1) {
+		dprintf("core [%d] online from bootstrap perspective\n", id());
+		return true;
 	} else {
-		dprintf("we have not successfulyl started the core");
+		dprintf("core [%d] offline from bootstrap perspective\n", id());
+		return false;
 	}
-	return *liveness == 0x6767;
-
-	// Send next sipi
-
-	// Clear page we copied into maybe???
-
-
 }
 
 
@@ -185,49 +182,6 @@ pfn_t x86_core::prepare_trampoline_code()
 	return target_pfn;
 }
 
-#if 0
-
-bool x86_core::remote_run()
-{
-	auto &me = this_core();
-
-	pfn_t mpstart_pfn = prepare_mpstartup_code();
-
-	// Acquire a pointer to the mp startup data structure, which we need to fill in.  It should
-	// be volatile, so that we can check the mpready flag without worrying that the compiler
-	// optimises "redundant checks" away.
-	volatile mpstartup_data *d = (volatile mpstartup_data *)&_MPSTARTUP_DATA;
-	d->mpready = 0; // Is the core ready?
-	d->mpcr3 = __read_cr3(); // The pages tables to provide the core with (just the same as this core's)
-	d->core_obj = this; // A pointer to the core object that is coming online
-	d->mpstack = (void *)(((u64) new char[0x1000]) + 0x1000); // A temporary stack (which we need to remember to free at some point)
-	d->trampoline = &exegol::arch::x86::x86_core::complete_remote_init; // The function to call once we've gotten into 64-bit mode
-
-	// Stick in a full memory fence, just to be safe.
-	asm volatile("mfence" ::: "memory");
-
-	// The sequence is INIT --> SIPI (--> SIPI)
-
-	// Send the INIT
-	me.lapic_.send_remote_init(id());
-	me.tsc_.spin(10); // Wait for 10ms...
-
-	// Send the SIPI
-	me.lapic_.send_remote_sipi(id(), mpstart_pfn);
-	me.tsc_.spin(1); // Wait for 1ms...
-
-	// If the core didn't come online, send another SIPI and give it a second
-	if (!d->mpready) {
-		me.lapic_.send_remote_sipi(id(), mpstart_pfn);
-		me.tsc_.spin(1000); // 1s
-	}
-
-	// Return whether or not the core came online.
-	return !!d->mpready;
-}
-
-
-
 void x86_core::complete_remote_init()
 {
 	// Update the TSC aux MSR with the core ID, so that the rdpid instruction works.
@@ -239,7 +193,6 @@ void x86_core::complete_remote_init()
 	init();
 	run();
 }
-#endif
 
 void x86_core::handle_gpf(machine_context *mc)
 {
