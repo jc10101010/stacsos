@@ -31,6 +31,7 @@ public:
 
 	static int this_core_id() { return core::this_core_id(); }
 	static x86_core &this_core() { return (x86_core &)core::this_core(); }
+	static void set_this_core_id(int id) { msrs::ia32_tsc_aux = (u64)id; }
 
 	virtual void init() override;
 	virtual bool remote_run() override;

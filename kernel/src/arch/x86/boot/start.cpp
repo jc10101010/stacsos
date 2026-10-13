@@ -7,6 +7,7 @@
  */
 #include <stacsos/kernel/arch/x86/boot/multiboot.h>
 #include <stacsos/kernel/arch/x86/cpuid.h>
+#include <stacsos/kernel/arch/x86/x86-core.h>
 #include <stacsos/kernel/debug.h>
 #include <stacsos/kernel/mem/memory-manager.h>
 #include <stacsos/kernel/mem/page-table.h>
@@ -152,20 +153,23 @@ extern "C" __noreturn void x86_start(const multiboot_info *multiboot_info)
 
 /**
  * Main entry point for application processors, after coming in from the long-mode assembly code.
- * @param closure_func A function pointer for our AP to execute after x86 startup
+ * @param core_id The id the bootstrap core handed this AP via the trampoline data.
  */
-extern "C" __noreturn void x86_ap_start(void* closure_func)
+extern "C" __noreturn void x86_ap_start(u64 core_id)
 {
-	// Clear lower mappings in the virtual address space.  This will significantly
-	// help with any memory-related bugs.  Especially since it removes the zero page!
-	clear_lower_mappings();
+	// Record who we are
+	x86_core::set_this_core_id((int)core_id);
 
-	dprintf("HELLO WORLD THIS IS CORE\n");
+	dprintf("HELLO WORLD THIS IS CORE %d\n", (int)core_id);
 
 	// Park the core.  Interrupts are still masked, so this halts for good.
 	for (;;) {
 		asm volatile("hlt");
 	}
+
+	// NEED TO REMOVE LOWER MAPPINGS
+	// WHAT ARE INIT() and RUN()
+
 
 	// // Make sure arch features are available.
 	// check_arch_support();

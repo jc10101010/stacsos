@@ -254,15 +254,9 @@ has_fsgs:
     leal    (trampoline64_start - trampoline_start)(%edx), %eax
     movl    %eax, (farjmp_long - trampoline_start)(%edx)
 
-    # Compute the linear address of the closure pointer here, while we are still
-    # in the .trampoline.text16 section. Calculation must be in the same section
-    leal    (trampoline_data_asm_ptr - trampoline_start)(%edx), %edi
-
-    # Tell the bootstrap core we are up: atomically zero our given core id.
-    # xchg to memory carries an implicit lock, so this is the atomic handshake
-    # the BSP spins on; eax receives the id the BSP handed us (and is discarded).
-    xorl    %eax, %eax
-    xchgl   %eax, (trampoline_data_asm_given_core_id - trampoline_start)(%edx)
+    # Atomically claim our given core id
+    xorl    %edi, %edi
+    xchgl   %edi, (trampoline_data_asm_given_core_id - trampoline_start)(%edx)
 
     ljmp    *(farjmp_long - trampoline_start)(%edx)     # jump to trampoline64_start (long mode)
 
@@ -294,7 +288,7 @@ trampoline64_start:
     mov $0xffff800000000000, %rcx
     add %rcx, %rsp
 
-    # rdi holds the pointer given to use by the kernel
+    # rdi holds the core id the BSP handed us (captured by the xchg above)
     # We need to zero upper 32 bits of rdi
     mov %edi, %edi
 

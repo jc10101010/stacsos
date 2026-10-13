@@ -188,8 +188,6 @@ pfn_t x86_core::prepare_trampoline_code()
 
 void x86_core::complete_remote_init()
 {
-	// Update the TSC aux MSR with the core ID, so that the rdpid instruction works.
-	msr::write(msr_indicies::IA32_TSC_AUX, id());
 
 	dprintf("core [%d] online\n", id());
 
