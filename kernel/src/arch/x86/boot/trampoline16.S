@@ -258,6 +258,12 @@ has_fsgs:
     # in the .trampoline.text16 section. Calculation must be in the same section
     leal    (trampoline_data_asm_ptr - trampoline_start)(%edx), %edi
 
+    # Tell the bootstrap core we are up: atomically zero our given core id.
+    # xchg to memory carries an implicit lock, so this is the atomic handshake
+    # the BSP spins on; eax receives the id the BSP handed us (and is discarded).
+    xorl    %eax, %eax
+    xchgl   %eax, (trampoline_data_asm_given_core_id - trampoline_start)(%edx)
+
     ljmp    *(farjmp_long - trampoline_start)(%edx)     # jump to trampoline64_start (long mode)
 
 no_1g:
@@ -307,7 +313,9 @@ trampoline64_start:
 .type trampoline_data_asm, %object
 trampoline_data_asm:
 trampoline_data_asm_count:
-    .long 0
+    .long 0     /* atomic stack-claim counter      (offset 0) */
+trampoline_data_asm_given_core_id:
+    .long 0     /* id handed to this AP by the BSP (offset 4) */
 trampoline_data_asm_ptr:
-    .quad 0     /* void (*trampoline)()    (offset 4) */
+    .quad 0     /* void (*trampoline)()            (offset 8) */
 .size trampoline_data_asm,.-trampoline_data_asm

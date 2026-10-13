@@ -106,8 +106,9 @@ void x86_core::populate_dt()
 	tss_.reload(0x28);
 }
 
-struct trampoline_data {	
-	u32 core_count;		  
+struct trampoline_data {
+	u32 core_count;		   // atomic counter: each AP xadds this to claim its scratch stack
+	u32 given_core_id;	   // the BSP writes the AP's id here; the AP atomically zeroes it when up
 	void (*closure)(void);
 } __packed;
 
@@ -138,26 +139,29 @@ bool x86_core::remote_run() {
 	void* trampoline_moved_data_virt = trampoline_moved_virt + _TRAMPOLINE_DATA_OFFSET;
 	trampoline_data* trampoline_moved_data = (trampoline_data*) trampoline_moved_data_virt;
 
-	// Now we need to link back the closure
-	int num_cores_before = trampoline_moved_data->core_count;
-	if (num_cores_before == 0) {
+	if (trampoline_moved_data->core_count == 0) {
 		trampoline_moved_data->closure = &trampoline_closure;
 	}
+
+	// Hand this core its id.  The AP atomically zeroes this field once it is up,
+	// which is how we know it is done.  View it through a volatile pointer so the
+	// compiler reloads the value on every check rather than caching our store.
+	volatile trampoline_data *td = trampoline_moved_data;
+	td->given_core_id = id();
 
 	// INIT, then SIPI.
 	me_bsp.lapic_.send_remote_init(id());
 	me_bsp.tsc_.spin(10); // Wait for 10ms...
 	me_bsp.lapic_.send_remote_sipi(id(), trampoline_pfn);
-	me_bsp.tsc_.spin(10); // Give the AP time to run the trampoline.
+	me_bsp.tsc_.spin(10);
 
-	int num_cores_after = trampoline_moved_data->core_count;
-	if (num_cores_after == num_cores_before + 1) {
-		dprintf("core [%d] online from bootstrap perspective\n", id());
+	if (td->given_core_id == 0) {
+		dprintf("bootstrap started core [%d]\n", id());
 		return true;
-	} else {
-		dprintf("core [%d] offline from bootstrap perspective\n", id());
-		return false;
 	}
+
+	dprintf("bootstrap failed to start core [%d]\n", id());
+	return false;
 }
 
 
