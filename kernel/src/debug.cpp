@@ -10,6 +10,7 @@
 #include <stacsos/kernel/arch/x86/pio.h>
 #include <stacsos/kernel/arch/x86/text-console.h>
 #include <stacsos/kernel/debug.h>
+#include <stacsos/kernel/lock.h>
 #include <stacsos/printf.h>
 
 using namespace stacsos;
@@ -29,9 +30,12 @@ void stacsos::kernel::dprintf_init()
 }
 
 static char dprint_buffer[512];
+static spinlock_irq dprint_lock;
 
 void stacsos::kernel::dprintf(const char *fmt, ...)
 {
+	unique_irq_lock guard(dprint_lock);
+
 	va_list args;
 	va_start(args, fmt);
 	vsnprintf(dprint_buffer, sizeof(dprint_buffer), fmt, args);
